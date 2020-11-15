@@ -33,4 +33,9 @@ command.
 - [x] exec
 - [x] print
 - [x] L
-- [ ] Parsing cli correctly
+- [x] Parsing cli correctly
+- [ ] error messages are definitely different.
+- [ ] Testing
+  - [x] framework up
+  - [ ] cases up
+  - [ ] all tests pass!
