@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 clap = "3.0.0-beta.2"
 fnmatch-sys = "1.0"
+subprocess = "0.2"

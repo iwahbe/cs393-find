@@ -28,8 +28,9 @@ command.
 ## Progress
 
 - [x] name
-- [ ] mtime
+- [x] mtime
 - [x] type
-- [ ] exec
-- [ ] print
+- [x] exec
+- [x] print
 - [x] L
+- [ ] Parsing cli correctly
