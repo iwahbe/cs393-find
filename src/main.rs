@@ -1,5 +1,6 @@
 use clap::{App, Arg, ArgMatches};
 use std::fs::Metadata;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
@@ -72,12 +73,12 @@ fn getopts() -> ArgMatches {
     // Eample -name instead of --name
 }
 
-type Predicate = Box<dyn Fn(&Path, &Metadata) -> bool>;
+type Predicate = Box<dyn Fn(&Path, &Metadata) -> io::Result<bool>>;
 
 fn type_predicate(predicate: Predicate, accepted: Vec<String>) -> Predicate {
     Box::new(move |p, m: &Metadata| {
         let ft = m.file_type();
-        predicate(p, m)
+        Ok(predicate(p, m)?
             && if ft.is_block_device() {
                 accepted.contains(&String::from("b"))
             } else if ft.is_char_device() {
@@ -94,14 +95,14 @@ fn type_predicate(predicate: Predicate, accepted: Vec<String>) -> Predicate {
                 accepted.contains(&String::from("s"))
             } else {
                 panic!("Found unimplemented type")
-            }
+            })
     })
 }
 
 fn time_predicate(predicate: Predicate, accepted: i32) -> Predicate {
     Box::new(move |p, m: &Metadata| {
-        predicate(p, m) && {
-            let modified = m.modified().unwrap();
+        Ok(predicate(p, m)? && {
+            let modified = m.modified()?;
             let now = std::time::SystemTime::now();
             let time_delta = if modified > now {
                 modified.duration_since(now).unwrap().as_secs()
@@ -118,13 +119,13 @@ fn time_predicate(predicate: Predicate, accepted: i32) -> Predicate {
             } else {
                 time_delta < (-accepted) as f64
             }
-        }
+        })
     })
 }
 
 fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
     Box::new(move |p, m| {
-        predicate(p, m) && {
+        Ok(predicate(p, m)? && {
             let path = p.components().last().unwrap().as_os_str();
             let path = unsafe { CString::from_vec_unchecked(path.as_bytes().to_vec()) };
             let result = unsafe {
@@ -141,22 +142,22 @@ fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
             } else {
                 panic!("fnmatch failed")
             }
-        }
+        })
     })
 }
 
 fn exec_predicate(predicate: Predicate, command: String) -> Predicate {
     Box::new(move |p, m| {
-        predicate(p, m) && {
+        Ok(predicate(p, m)? && {
             Exec::shell(command.to_string().replace("{}", &p.to_string_lossy()))
                 .join()
                 .unwrap()
                 .success()
-        }
+        })
     })
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> io::Result<()> {
     let opts = getopts();
     let starting_point = {
         let p = Path::new(opts.value_of("starting_point").unwrap_or("."));
@@ -167,7 +168,7 @@ fn main() -> std::io::Result<()> {
         }
     };
     // Default predicate: everything passes.
-    let mut predicate: Predicate = Box::new(|_, _| true);
+    let mut predicate: Predicate = Box::new(|_, _| Ok(true));
     if let Some(types) = opts.values_of("type").take() {
         // Apply type arg
         predicate = type_predicate(predicate, types.map(|f| f.to_string()).collect());
@@ -193,19 +194,19 @@ fn crawl_path(
     path: &Path,
     predicate: &Predicate,
     follow_syms: bool,
-) -> Result<impl Iterator<Item = PathBuf>, std::io::Error> {
+) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
     let meta = if follow_syms {
         std::fs::metadata(path)?
     } else {
         std::fs::symlink_metadata(path)?
     };
     let mut out = Vec::new();
-    if predicate(path, &meta) {
+    if predicate(path, &meta)? {
         out.push(path.to_path_buf());
     }
     if path.is_dir() {
-        for fs in std::fs::read_dir(path).unwrap() {
-            out.extend(crawl_path(&fs.unwrap().path(), predicate, follow_syms)?)
+        for fs in std::fs::read_dir(path)? {
+            out.extend(crawl_path(&fs?.path(), predicate, follow_syms)?)
         }
     }
     Ok(out.into_iter())
