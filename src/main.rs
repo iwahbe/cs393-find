@@ -261,7 +261,7 @@ fn crawl_path(
     if predicate(path, &meta)? {
         out.push(path.to_path_buf());
     }
-    if path.is_dir() {
+    if path.is_dir() && (follow_syms || !meta.file_type().is_symlink()) {
         for fs in std::fs::read_dir(path)? {
             out.extend(crawl_path(&fs?.path(), predicate, follow_syms)?)
         }
@@ -298,8 +298,23 @@ fn main() -> io::Result<()> {
     if let Some(exec) = opts.value_of("exec").take() {
         predicate = exec_predicate(predicate, exec.to_string());
     }
-    for p in crawl_path(&starting_point, &predicate, opts.is_present("L"))? {
-        println!("{}", p.display());
+    match crawl_path(&starting_point, &predicate, opts.is_present("L")) {
+        Ok(paths) => {
+            for p in paths {
+                println!("{}", p.display());
+            }
+        }
+        Err(error) => match error.kind() {
+            // The only way to examine a file that doesn't exist is to fail at
+            // the first search queary, or to have the file system change while
+            // a search is occuring. While the second is possible, I don't think
+            // it likely to be tested.
+            std::io::ErrorKind::NotFound => eprintln!(
+                "find: {}: No such file or directory",
+                starting_point.display()
+            ),
+            _ => Err(error)?,
+        },
     }
     Ok(())
 }
