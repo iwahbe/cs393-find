@@ -9,7 +9,7 @@ cargo build --release || exit
 
 # find executable and test directory
 test_dir=$(realpath tests)
-find=$(realpath ./target/release/find)
+find=$(realpath ./target/release/myfind)
 original_dir=$PWD
 
 all_passed=true
@@ -23,6 +23,7 @@ pass () {
 
 # run tests
 echo -e "\n\n\t\e[1m\e[32m Start Integration Tests\e[0m\n"
+echo -e "Found executable \"$find\"\n"
 for tst in $test_dir/*; do
     if [ -f "$tst/args" ] && [ -f "$tst/prep" ]; then
         cd "$tst" && bash -c "$tst/prep"

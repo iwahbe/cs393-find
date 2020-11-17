@@ -1,5 +1,5 @@
 [package]
-name = "find"
+name = "myfind"
 version = "0.1.0"
 authors = ["Ian Wahbe <ian@wahbe.com>"]
 edition = "2018"
