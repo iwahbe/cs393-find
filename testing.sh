@@ -34,7 +34,7 @@ for tst in $test_dir/*; do
         args=$(cat args)
         $find $args > test.out 2> test.err
         find $args  > crct.out 2> crct.err
-        echo -n "Testing $tst with arg: $args ... "
+        echo -n "Testing $(basename $tst) with arg: $args ... "
         diff test.out crct.out > /dev/null && \
             diff test.err crct.err > /dev/null && \
             pass || fail

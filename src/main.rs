@@ -260,9 +260,6 @@ fn crawl_path(
     follow_syms: bool,
     visited: &mut HashSet<u64>,
 ) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
-    if !path.exists() {
-        return Ok(vec![path.to_path_buf()].into_iter());
-    }
     let meta = if follow_syms {
         std::fs::metadata(path)?
     } else {
@@ -278,7 +275,11 @@ fn crawl_path(
     {
         for fs in std::fs::read_dir(path)? {
             let fs = fs?.path();
-            out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
+            if !fs.exists() && predicate(&fs, &std::fs::symlink_metadata(&fs)?)? {
+                out.push(fs.to_path_buf());
+            } else {
+                out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
+            }
         }
     }
     Ok(out.into_iter())
