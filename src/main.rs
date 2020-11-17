@@ -260,24 +260,25 @@ fn crawl_path(
     follow_syms: bool,
     visited: &mut HashSet<u64>,
 ) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
+    if !path.exists() {
+        return Ok(vec![path.to_path_buf()].into_iter());
+    }
     let meta = if follow_syms {
         std::fs::metadata(path)?
     } else {
         std::fs::symlink_metadata(path)?
     };
     let mut out = Vec::new();
-    if !visited.insert(meta.ino()) {
-        return Ok(out.into_iter());
-    }
     if predicate(path, &meta)? {
         out.push(path.to_path_buf());
     }
-    if meta.is_dir() && (follow_syms || !meta.file_type().is_symlink()) {
+    if meta.is_dir()
+        && (follow_syms || !meta.file_type().is_symlink())
+        && visited.insert(meta.ino())
+    {
         for fs in std::fs::read_dir(path)? {
             let fs = fs?.path();
-            if fs.exists() {
-                out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
-            }
+            out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
         }
     }
     Ok(out.into_iter())
@@ -313,6 +314,13 @@ fn main() -> io::Result<()> {
         predicate = exec_predicate(predicate, exec.to_string());
     }
     let mut visited = HashSet::new();
+    if !starting_point.exists() {
+        eprintln!(
+            "find: {}: No such file or directory",
+            starting_point.display()
+        );
+        return Ok(());
+    }
     match crawl_path(
         &starting_point,
         &predicate,
