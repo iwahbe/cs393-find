@@ -34,8 +34,12 @@ command.
 - [x] print
 - [x] L
 - [x] Parsing cli correctly
-- [ ] error messages are definitely different.
+- [x] error messages are definitely different.
 - [ ] Testing
   - [x] framework up
-  - [ ] cases up
-  - [ ] all tests pass!
+  - [ ] mtime
+  - [x] type
+  - [x] name
+  - [ ] exec
+  - [ ] print
+  - [x] L

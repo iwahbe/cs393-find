@@ -98,8 +98,7 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                                  arguments to the command.",
                 )
                 .takes_value(true)
-                .value_name("command")
-                .conflicts_with("print"),
+                .value_name("command"),
         )
         .arg(
             Arg::new("print").long("print").about(
@@ -313,6 +312,13 @@ fn main() -> io::Result<()> {
     }
     if let Some(exec) = opts.value_of("exec").take() {
         predicate = exec_predicate(predicate, exec.to_string());
+    }
+    if opts.is_present("print") {
+        // we print everything anyway
+        predicate = Box::new(move |p, m| {
+            predicate(p, m)?;
+            Ok(true)
+        });
     }
     let mut visited = HashSet::new();
     if !starting_point.exists() {
