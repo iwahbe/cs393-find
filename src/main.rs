@@ -1,6 +1,8 @@
 use clap::{App, Arg, ArgMatches};
+use std::collections::HashSet;
 use std::fs::Metadata;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::{ffi::OsStrExt, fs::FileTypeExt};
 use std::path::Path;
 use std::path::PathBuf;
@@ -156,26 +158,31 @@ type Predicate = Box<dyn Fn(&Path, &Metadata) -> io::Result<bool>>;
 ///
 /// Panics on unknown flag. This should be handled by Clap.
 fn type_predicate(predicate: Predicate, accepted: Vec<String>) -> Predicate {
+    macro_rules! false_when {
+        ($b:expr) => {
+            if $b {
+                return Ok(false);
+            }
+        };
+    }
     Box::new(move |p, m: &Metadata| {
         let ft = m.file_type();
-        Ok(predicate(p, m)?
-            && if ft.is_block_device() {
-                accepted.contains(&String::from("b"))
-            } else if ft.is_char_device() {
-                accepted.contains(&String::from("c"))
-            } else if ft.is_dir() {
-                accepted.contains(&String::from("d"))
-            } else if ft.is_fifo() {
-                accepted.contains(&String::from("p"))
-            } else if ft.is_file() {
-                accepted.contains(&String::from("f"))
-            } else if ft.is_symlink() {
-                accepted.contains(&String::from("l"))
-            } else if ft.is_socket() {
-                accepted.contains(&String::from("s"))
-            } else {
-                panic!("Found unimplemented type")
-            })
+        Ok(predicate(p, m)? && {
+            for t in &accepted {
+                let t: &str = &t;
+                match t {
+                    "b" => false_when!(!ft.is_block_device()),
+                    "c" => false_when!(!ft.is_char_device()),
+                    "d" => false_when!(!ft.is_dir()),
+                    "p" => false_when!(!ft.is_fifo()),
+                    "f" => false_when!(!ft.is_file()),
+                    "l" => false_when!(!ft.is_symlink()),
+                    "s" => false_when!(!ft.is_socket()),
+                    _ => panic!("Found unimplemented type"),
+                }
+            }
+            true
+        })
     })
 }
 
@@ -251,6 +258,7 @@ fn crawl_path(
     path: &Path,
     predicate: &Predicate,
     follow_syms: bool,
+    visited: &mut HashSet<u64>,
 ) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
     let meta = if follow_syms {
         std::fs::metadata(path)?
@@ -258,12 +266,18 @@ fn crawl_path(
         std::fs::symlink_metadata(path)?
     };
     let mut out = Vec::new();
+    if !visited.insert(meta.ino()) {
+        return Ok(out.into_iter());
+    }
     if predicate(path, &meta)? {
         out.push(path.to_path_buf());
     }
-    if path.is_dir() && (follow_syms || !meta.file_type().is_symlink()) {
+    if meta.is_dir() && (follow_syms || !meta.file_type().is_symlink()) {
         for fs in std::fs::read_dir(path)? {
-            out.extend(crawl_path(&fs?.path(), predicate, follow_syms)?)
+            let fs = fs?.path();
+            if fs.exists() {
+                out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
+            }
         }
     }
     Ok(out.into_iter())
@@ -298,7 +312,13 @@ fn main() -> io::Result<()> {
     if let Some(exec) = opts.value_of("exec").take() {
         predicate = exec_predicate(predicate, exec.to_string());
     }
-    match crawl_path(&starting_point, &predicate, opts.is_present("L")) {
+    let mut visited = HashSet::new();
+    match crawl_path(
+        &starting_point,
+        &predicate,
+        opts.is_present("L"),
+        &mut visited,
+    ) {
         Ok(paths) => {
             for p in paths {
                 println!("{}", p.display());
@@ -311,6 +331,10 @@ fn main() -> io::Result<()> {
             // it likely to be tested.
             std::io::ErrorKind::NotFound => eprintln!(
                 "find: {}: No such file or directory",
+                starting_point.display()
+            ),
+            std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
+                "find: {}: Too many levels of symbolic links",
                 starting_point.display()
             ),
             _ => Err(error)?,
