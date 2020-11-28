@@ -5,13 +5,16 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::{ffi::OsStrExt, fs::FileTypeExt};
 use std::path::Path;
-use std::path::PathBuf;
 use std::process::exit;
 
 use std::ffi::CString;
 
 use fnmatch_sys::{fnmatch, FNM_NOMATCH};
 use subprocess::Exec;
+
+fn sig_error(message: &dyn std::fmt::Display) {
+    eprintln!("find: {}", message);
+}
 
 #[cfg(test)]
 mod test {
@@ -256,10 +259,11 @@ fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
 fn exec_predicate(predicate: Predicate, command: String) -> Predicate {
     Box::new(move |p, m| {
         Ok(predicate(p, m)? && {
-            Exec::shell(command.to_string().replace("{}", &p.to_string_lossy()))
-                .join()
-                .unwrap()
-                .success()
+            match Exec::shell(command.to_string().replace("{}", &p.to_string_lossy())).join() {
+                Ok(_) => {}
+                Err(e) => sig_error(&e),
+            };
+            false
         })
     })
 }
@@ -272,15 +276,14 @@ fn crawl_path(
     predicate: &Predicate,
     follow_syms: bool,
     visited: &mut HashSet<u64>,
-) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
+) -> Result<(), io::Error> {
     let meta = if follow_syms {
         std::fs::metadata(path)?
     } else {
         std::fs::symlink_metadata(path)?
     };
-    let mut out = Vec::new();
     if predicate(path, &meta)? {
-        out.push(path.to_path_buf());
+        println!("{}", path.display());
     }
     if meta.is_dir()
         && (follow_syms || !meta.file_type().is_symlink())
@@ -289,13 +292,13 @@ fn crawl_path(
         for fs in std::fs::read_dir(path)? {
             let fs = fs?.path();
             if !fs.exists() && predicate(&fs, &std::fs::symlink_metadata(&fs)?)? {
-                out.push(fs.to_path_buf());
+                println!("{}", fs.display());
             } else {
-                out.extend(crawl_path(&fs, predicate, follow_syms, visited)?)
+                crawl_path(&fs, predicate, follow_syms, visited)?
             }
         }
     }
-    Ok(out.into_iter())
+    Ok(())
 }
 
 fn form_predicate(opts: &ArgMatches) -> Predicate {
@@ -337,7 +340,7 @@ fn main() -> io::Result<()> {
     let pre_process = match preprocess_args(args) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("find: {}", e);
+            sig_error(&e);
             exit(1);
         }
     };
@@ -352,10 +355,10 @@ fn main() -> io::Result<()> {
     };
     let mut visited = HashSet::new();
     if !starting_point.exists() {
-        eprintln!(
-            "find: {}: No such file or directory",
+        sig_error(&format!(
+            "{}: No such file or directory",
             starting_point.display()
-        );
+        ));
         exit(1);
     }
     let predicate = form_predicate(&opts);
@@ -365,26 +368,22 @@ fn main() -> io::Result<()> {
         opts.is_present("L"),
         &mut visited,
     ) {
-        Ok(paths) => {
-            for p in paths {
-                println!("{}", p.display());
-            }
-        }
+        Ok(_) => {}
         Err(error) => {
             match error.kind() {
                 // The only way to examine a file that doesn't exist is to fail at
                 // the first search queary, or to have the file system change while
                 // a search is occuring. While the second is possible, I don't think
                 // it likely to be tested.
-                std::io::ErrorKind::NotFound => eprintln!(
-                    "find: {}: No such file or directory",
+                std::io::ErrorKind::NotFound => sig_error(&format!(
+                    "{}: No such file or directory",
                     starting_point.display()
-                ),
+                )),
                 std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
                     "find: {}: Too many levels of symbolic links",
                     starting_point.display()
                 ),
-                _ => eprint!("find: {}", error),
+                _ => sig_error(&error),
             };
             exit(1);
         }

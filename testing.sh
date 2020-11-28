@@ -37,7 +37,7 @@ for tst in $test_dir/*; do
         echo $? > test.exit
         find $args  > crct.out 2> crct.err
         echo $? > crct.exit
-        echo -n "Testing $(basename $tst) with arg: $args ... "
+        echo -n "Testing $(basename $tst) with args: $args ... "
         diff test.out crct.out && \
             diff test.err crct.err && \
             diff test.exit crct.exit && \
