@@ -9,7 +9,11 @@ cargo build --release || exit
 
 # find executable and test directory
 test_dir=$(realpath tests)
-find=$(realpath ./target/release/myfind)
+myfind=$(realpath ./target/release/myfind)
+find=$(which gfind)
+if [ "$?" -eq 1 ]; then
+    find=$(which find)
+fi
 original_dir=$PWD
 
 all_passed=true
@@ -23,7 +27,8 @@ pass () {
 
 # run tests
 echo -e "\n\n\t\e[1m\e[32m Start Integration Tests\e[0m\n"
-echo -e "Found executable \"$find\"\n"
+echo -e "Found myfind executable \"$myfind\""
+echo -e "Found find executable \"$find\"\n"
 for tst in $test_dir/*; do
     if [ -f "$tst/args" ] && [ -f "$tst/prep" ]; then
         cd "$tst" && bash -c "$tst/prep"
@@ -33,9 +38,9 @@ for tst in $test_dir/*; do
     if [ -f "$tst/args" ]; then
         cd $tst || exit
         args=$(cat args)
-        $find $args > test.out 2> test.err
+        $myfind $args > test.out 2> test.err
         echo $? > test.exit
-        find $args  > crct.out 2> crct.err
+        $find $args  > crct.out 2> crct.err
         echo $? > crct.exit
         echo -n "Testing $(basename $tst) with args: $args ... "
         diff test.out crct.out && \

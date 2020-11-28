@@ -161,7 +161,7 @@ where
         }
     }
     if exec.is_some() {
-        return Err("-exec: no terminating \";\" or \"+\"");
+        return Err("missing argument to `-exec'");
     }
 
     Ok(out)
@@ -356,7 +356,7 @@ fn main() -> io::Result<()> {
     let mut visited = HashSet::new();
     if !starting_point.exists() {
         sig_error(&format!(
-            "{}: No such file or directory",
+            "‘{}’: No such file or directory",
             starting_point.display()
         ));
         exit(1);
@@ -376,7 +376,7 @@ fn main() -> io::Result<()> {
                 // a search is occuring. While the second is possible, I don't think
                 // it likely to be tested.
                 std::io::ErrorKind::NotFound => sig_error(&format!(
-                    "{}: No such file or directory",
+                    "‘{}’: No such file or directory",
                     starting_point.display()
                 )),
                 std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
