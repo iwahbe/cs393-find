@@ -62,7 +62,8 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                 .long("name")
                 .value_name("pattern")
                 .about("Filters file names according to a glob expanded path.")
-                .takes_value(true),
+                .takes_value(true)
+                .multiple_occurrences(true),
         )
         .arg(
             Arg::new("mtime")
@@ -76,7 +77,8 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                     Ok(_) => Ok(()),
                     Err(e) => Err(e),
                 })
-                .allow_hyphen_values(true),
+                .allow_hyphen_values(true)
+                .multiple_occurrences(true),
         )
         .arg(
             Arg::new("type")
@@ -84,7 +86,8 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                 .takes_value(true)
                 .value_name("t")
                 .possible_values(&["b", "c", "d", "p", "f", "l", "s"])
-                .require_delimiter(true),
+                .require_delimiter(true)
+                .multiple_occurrences(true),
         )
         .arg(
             Arg::new("exec")
@@ -98,12 +101,16 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                                  arguments to the command.",
                 )
                 .takes_value(true)
-                .value_name("command"),
+                .value_name("command")
+                .multiple_occurrences(true),
         )
         .arg(
-            Arg::new("print").long("print").about(
-                "True; print the full file name on the standard output, followed by a newline",
-            ),
+            Arg::new("print")
+                .long("print")
+                .about(
+                    "True; print the full file name on the standard output, followed by a newline",
+                )
+                .multiple_occurrences(true),
         )
         .get_matches_from(preprocessed_args)
 }
@@ -302,16 +309,22 @@ fn main() -> io::Result<()> {
         // Apply type arg
         predicate = type_predicate(predicate, types.map(|f| f.to_string()).collect());
     }
-    if let Some(name) = opts.value_of("name").take() {
+    if let Some(names) = opts.values_of("name").take() {
         // apply name are
-        let name = unsafe { CString::from_vec_unchecked(name.as_bytes().to_vec()) };
-        predicate = name_predicate(predicate, name);
+        predicate = names.fold(predicate, |predicate, name| {
+            let name = unsafe { CString::from_vec_unchecked(name.as_bytes().to_vec()) };
+            name_predicate(predicate, name)
+        })
     }
-    if let Some(mtime) = opts.value_of("mtime").take() {
-        predicate = time_predicate(predicate, mtime.parse().unwrap());
+    if let Some(mtimes) = opts.values_of("mtime").take() {
+        predicate = mtimes.fold(predicate, |predicate, mtime| {
+            time_predicate(predicate, mtime.parse().unwrap())
+        })
     }
-    if let Some(exec) = opts.value_of("exec").take() {
-        predicate = exec_predicate(predicate, exec.to_string());
+    if let Some(execs) = opts.values_of("exec").take() {
+        predicate = execs.fold(predicate, |predicate, exec| {
+            exec_predicate(predicate, exec.to_string())
+        })
     }
     if opts.is_present("print") {
         // we print everything anyway
