@@ -13,7 +13,7 @@ use fnmatch_sys::{fnmatch, FNM_NOMATCH};
 use subprocess::Exec;
 
 fn sig_error(message: &dyn std::fmt::Display) {
-    eprintln!("find: {}", message);
+    eprintln!("gfind: {}", message);
 }
 
 #[cfg(test)]
@@ -60,7 +60,11 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
         .about("An reimplimentation of find for scholastic purposes.")
         .arg(Arg::new("L").short('L').about("Follow symbolic links"))
         .arg(Arg::new("C").short('C').about("Canonicalize paths"))
-        .arg(Arg::new("starting_point").about("Starting point for search"))
+        .arg(
+            Arg::new("starting_point")
+                .about("Starting point for search")
+                .multiple(true),
+        )
         .arg(
             Arg::new("name")
                 .long("name")
@@ -345,48 +349,51 @@ fn main() -> io::Result<()> {
         }
     };
     let opts = getopts(pre_process);
-    let starting_point = {
-        let p = Path::new(opts.value_of("starting_point").unwrap_or("."));
-        if opts.is_present("C") {
-            p.canonicalize().unwrap()
-        } else {
-            p.to_path_buf()
-        }
+    let starting_points: Vec<_> = {
+        opts.values_of("starting_point")
+            .unwrap()
+            .map(|path| {
+                let p = Path::new(path);
+                if opts.is_present("C") {
+                    p.canonicalize().unwrap()
+                } else {
+                    p.to_path_buf()
+                }
+            })
+            .collect()
     };
-    let mut visited = HashSet::new();
-    if !starting_point.exists() {
-        sig_error(&format!(
-            "‘{}’: No such file or directory",
-            starting_point.display()
-        ));
-        exit(1);
-    }
-    let predicate = form_predicate(&opts);
-    match crawl_path(
-        &starting_point,
-        &predicate,
-        opts.is_present("L"),
-        &mut visited,
-    ) {
-        Ok(_) => {}
-        Err(error) => {
-            match error.kind() {
-                // The only way to examine a file that doesn't exist is to fail at
-                // the first search queary, or to have the file system change while
-                // a search is occuring. While the second is possible, I don't think
-                // it likely to be tested.
-                std::io::ErrorKind::NotFound => sig_error(&format!(
-                    "‘{}’: No such file or directory",
-                    starting_point.display()
-                )),
-                std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
-                    "find: {}: Too many levels of symbolic links",
-                    starting_point.display()
-                ),
-                _ => sig_error(&error),
-            };
-            exit(1);
+    let mut error_no: i32 = 0;
+    for starting_point in starting_points {
+        let mut visited = HashSet::new();
+        let predicate = form_predicate(&opts);
+        match crawl_path(
+            &starting_point,
+            &predicate,
+            opts.is_present("L"),
+            &mut visited,
+        ) {
+            Ok(_) => {}
+            Err(error) => {
+                match error.kind() {
+                    // The only way to examine a file that doesn't exist is to fail at
+                    // the first search queary, or to have the file system change while
+                    // a search is occuring. While the second is possible, I don't think
+                    // it likely to be tested.
+                    std::io::ErrorKind::NotFound => sig_error(&format!(
+                        "‘{}’: No such file or directory",
+                        starting_point.display()
+                    )),
+                    std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => {
+                        sig_error(&format!(
+                            "{}: Too many levels of symbolic links",
+                            starting_point.display()
+                        ))
+                    }
+                    _ => sig_error(&error),
+                };
+                error_no = 1;
+            }
         }
     }
-    Ok(())
+    exit(error_no);
 }
