@@ -6,6 +6,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::{ffi::OsStrExt, fs::FileTypeExt};
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::exit;
 
 use std::ffi::CString;
 
@@ -30,7 +31,7 @@ mod test {
             "b",
         ];
         assert_eq!(
-            preprocess_args(start.iter().map(|s| s.to_string())),
+            preprocess_args(start.iter().map(|s| s.to_string())).unwrap(),
             vec![
                 "./filename",
                 "--name",
@@ -119,7 +120,10 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
 /// arguments. This handles the weird mechanic of exec, as well as changing
 /// -flag to --flag. Happily, normal flag use still works, and exec can still be
 /// passed a single argument as long as it's called with `--exec`.
-fn preprocess_args<I, S>(args: I) -> Vec<String>
+///
+/// If parsing was successful, then we return ok. Otherwise we return the string
+/// to be printed out when parsing fails.
+fn preprocess_args<I, S>(args: I) -> Result<Vec<String>, &'static str>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -153,8 +157,11 @@ where
             }
         }
     }
+    if exec.is_some() {
+        return Err("-exec: no terminating \";\" or \"+\"");
+    }
 
-    out
+    Ok(out)
 }
 
 /// Describes a command line given predicate.
@@ -291,18 +298,7 @@ fn crawl_path(
     Ok(out.into_iter())
 }
 
-fn main() -> io::Result<()> {
-    let args = std::env::args();
-    let pre_process = preprocess_args(args);
-    let opts = getopts(pre_process);
-    let starting_point = {
-        let p = Path::new(opts.value_of("starting_point").unwrap_or("."));
-        if opts.is_present("C") {
-            p.canonicalize().unwrap()
-        } else {
-            p.to_path_buf()
-        }
-    };
+fn form_predicate(opts: &ArgMatches) -> Predicate {
     // Default predicate: everything passes.
     let mut predicate: Predicate = Box::new(|_, _| Ok(true));
     if let Some(types) = opts.values_of("type").take() {
@@ -333,14 +329,36 @@ fn main() -> io::Result<()> {
             Ok(true)
         });
     }
+    predicate
+}
+
+fn main() -> io::Result<()> {
+    let args = std::env::args();
+    let pre_process = match preprocess_args(args) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("find: {}", e);
+            exit(1);
+        }
+    };
+    let opts = getopts(pre_process);
+    let starting_point = {
+        let p = Path::new(opts.value_of("starting_point").unwrap_or("."));
+        if opts.is_present("C") {
+            p.canonicalize().unwrap()
+        } else {
+            p.to_path_buf()
+        }
+    };
     let mut visited = HashSet::new();
     if !starting_point.exists() {
         eprintln!(
             "find: {}: No such file or directory",
             starting_point.display()
         );
-        return Ok(());
+        exit(1);
     }
+    let predicate = form_predicate(&opts);
     match crawl_path(
         &starting_point,
         &predicate,
@@ -352,21 +370,24 @@ fn main() -> io::Result<()> {
                 println!("{}", p.display());
             }
         }
-        Err(error) => match error.kind() {
-            // The only way to examine a file that doesn't exist is to fail at
-            // the first search queary, or to have the file system change while
-            // a search is occuring. While the second is possible, I don't think
-            // it likely to be tested.
-            std::io::ErrorKind::NotFound => eprintln!(
-                "find: {}: No such file or directory",
-                starting_point.display()
-            ),
-            std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
-                "find: {}: Too many levels of symbolic links",
-                starting_point.display()
-            ),
-            _ => Err(error)?,
-        },
+        Err(error) => {
+            match error.kind() {
+                // The only way to examine a file that doesn't exist is to fail at
+                // the first search queary, or to have the file system change while
+                // a search is occuring. While the second is possible, I don't think
+                // it likely to be tested.
+                std::io::ErrorKind::NotFound => eprintln!(
+                    "find: {}: No such file or directory",
+                    starting_point.display()
+                ),
+                std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => eprintln!(
+                    "find: {}: Too many levels of symbolic links",
+                    starting_point.display()
+                ),
+                _ => eprint!("find: {}", error),
+            };
+            exit(1);
+        }
     }
     Ok(())
 }

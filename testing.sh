@@ -34,10 +34,13 @@ for tst in $test_dir/*; do
         cd $tst || exit
         args=$(cat args)
         $find $args > test.out 2> test.err
+        echo $? > test.exit
         find $args  > crct.out 2> crct.err
+        echo $? > crct.exit
         echo -n "Testing $(basename $tst) with arg: $args ... "
-        diff test.out crct.out > /dev/null && \
-            diff test.err crct.err > /dev/null && \
+        diff test.out crct.out && \
+            diff test.err crct.err && \
+            diff test.exit crct.exit && \
             pass || fail
         cd $original_dir
     fi

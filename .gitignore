@@ -1,5 +1,7 @@
 /target
 test.err
 test.out
+test.exit
 crct.err
 crct.out
+crct.exit
