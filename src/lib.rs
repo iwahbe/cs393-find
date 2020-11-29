@@ -1,8 +1,12 @@
-use std::ffi::CString;
+#![warn(missing_docs)]
+
+//! Provides ways to construct a filtering predicate from cli args, crawl a
+//! directory conditional on that predicate, and format error messges.
 
 use clap::ArgMatches;
 use fnmatch_sys::{fnmatch, FNM_NOMATCH};
 use std::collections::HashSet;
+use std::ffi::CString;
 use std::fs::Metadata;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -99,14 +103,16 @@ fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
 /// Filters on the `--exec` predicate.
 ///
 /// Panics when the pipe fails.
-fn exec_predicate(predicate: Predicate, command: String) -> Predicate {
+fn exec_predicate(predicate: Predicate, command: String, print_anyway: bool) -> Predicate {
     Box::new(move |p, m| {
         Ok(predicate(p, m)? && {
             match Exec::shell(command.to_string().replace("{}", &p.to_string_lossy())).join() {
-                Ok(_) => {}
-                Err(e) => Error::Custom(&e).sig(),
-            };
-            false
+                Ok(t) => t.success() && print_anyway,
+                Err(e) => {
+                    Error::Custom(&e).sig();
+                    false
+                }
+            }
         })
     })
 }
@@ -175,26 +181,21 @@ pub fn form_predicate(opts: &ArgMatches) -> Predicate {
         })
     }
     if let Some(execs) = opts.values_of("exec").take() {
+        let print_anyway = opts.is_present("print");
         predicate = execs.fold(predicate, |predicate, exec| {
-            exec_predicate(predicate, exec.to_string())
+            exec_predicate(predicate, exec.to_string(), print_anyway)
         })
     }
-    // As far as I can tell, `-print` does not do anything for this stub of a
-    // program.
-    //
-    // if opts.is_present("print") {
-    //     // we print everything anyway
-    //     predicate = Box::new(move |p, m| {
-    //         predicate(p, m)?;
-    //         Ok(true)
-    //     });
-    // }
     predicate
 }
 
+/// Provides gnu-find compatible error handling.
 pub enum Error<T: std::fmt::Display> {
+    /// Signals the too many symlinks error, expects to be given the path it tried to seach.
     TooManySymlinks(T),
+    /// Signals whatever error it was given.
     Custom(T),
+    /// Signals no such file was found, expects to be given the file searched for.
     NoSuchFile(T),
 }
 
@@ -217,19 +218,23 @@ impl<T: std::fmt::Display> std::fmt::Display for Error<T> {
 impl<T: std::fmt::Display> Error<T> {
     /// Signal an error to the user. Does not exit.
     pub fn sig(&self) {
-        #[cfg(linux)]
-        let name = std::env::args_os()
-            .next()
-            .unwrap_or(std::ffi::OsString::from("myfind"));
-        #[cfg(not(linux))]
-        let name = std::ffi::OsString::from("gfind");
+        let name = if cfg!(target_os = "linux") {
+            std::env::args_os()
+                .next()
+                .unwrap_or(std::ffi::OsString::from("myfind"))
+        } else {
+            std::ffi::OsString::from("gfind")
+        };
         eprintln!("{}: {}", name.to_string_lossy(), self);
     }
 
+    /// Generates an error from an io::Error. If no error is found, a custom
+    /// error is generated with whatever message `error` gives.
+    #[must_use]
     pub fn from_io(error: io::Error, path: T) -> Error<String> {
-        #[cfg(linux)]
+        #[cfg(target_os = "linux")]
         let too_many_syms = Some(40);
-        #[cfg(not(linux))]
+        #[cfg(not(target_os = "linux"))]
         let too_many_syms = Some(62);
         match error.kind() {
             // The only way to examine a file that doesn't exist is to fail at
@@ -242,5 +247,88 @@ impl<T: std::fmt::Display> Error<T> {
             }
             _ => Error::Custom(format!("{}", error)),
         }
+    }
+}
+
+/// Clap is opinionated about how it accepts arguments. We thus preprocess our
+/// arguments. This handles the weird mechanic of exec, as well as changing
+/// -flag to --flag. Happily, normal flag use still works, and exec can still be
+/// passed a single argument as long as it's called with `--exec`.
+///
+/// If parsing was successful, then we return ok. Otherwise we return the string
+/// to be printed out when parsing fails.
+pub fn preprocess_args<I, S>(args: I) -> Result<Vec<String>, &'static str>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut out: Vec<String> = Vec::new();
+    let mut exec: Option<Vec<String>> = None;
+    for arg in args.into_iter() {
+        let arg = arg.into();
+        if let Some(mut cmd) = exec {
+            if &arg == ";" {
+                out.push(cmd.join(" "));
+                exec = None;
+            } else {
+                exec = Some({
+                    cmd.push(arg);
+                    cmd
+                });
+            }
+        } else {
+            let sarg: &str = &arg;
+            match sarg {
+                "-print" => out.push(String::from("--print")),
+                "-name" => out.push(String::from("--name")),
+                "-type" => out.push(String::from("--type")),
+                "-mtime" => out.push(String::from("--mtime")),
+                "-exec" => {
+                    out.push(String::from("--exec"));
+                    exec = Some(Vec::new());
+                }
+                _ => out.push(arg.to_string()),
+            }
+        }
+    }
+    if exec.is_some() {
+        return Err("missing argument to `-exec'");
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn preprocess() {
+        let start = [
+            "./filename",
+            "-name",
+            "thing*",
+            "-exec",
+            "cmd",
+            "-type",
+            ";",
+            "-type",
+            "b",
+        ];
+        assert_eq!(
+            preprocess_args(start.iter().map(|s| s.to_string())).unwrap(),
+            vec![
+                "./filename",
+                "--name",
+                "thing*",
+                "--exec",
+                "cmd -type",
+                "--type",
+                "b"
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+        );
     }
 }

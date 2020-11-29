@@ -43,8 +43,8 @@ for tst in $test_dir/*; do
         $find $args  > crct.out 2> crct.err
         echo $? > crct.exit
         echo -n "Testing $(basename $tst) with args: $args ... "
-        diff test.out crct.out && \
-            diff test.err crct.err && \
+        diff test.err crct.err && \
+            diff test.out crct.out && \
             diff test.exit crct.exit && \
             pass || fail
         cd $original_dir

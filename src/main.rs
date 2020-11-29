@@ -5,42 +5,7 @@ use std::path::Path;
 use std::process::exit;
 
 mod lib;
-use lib::{crawl_path, form_predicate, Error};
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn preprocess() {
-        let start = [
-            "./filename",
-            "-name",
-            "thing*",
-            "-exec",
-            "cmd",
-            "-type",
-            ";",
-            "-type",
-            "b",
-        ];
-        assert_eq!(
-            preprocess_args(start.iter().map(|s| s.to_string())).unwrap(),
-            vec![
-                "./filename",
-                "--name",
-                "thing*",
-                "--exec",
-                "cmd -type",
-                "--type",
-                "b"
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-        );
-    }
-}
+use lib::{crawl_path, form_predicate, preprocess_args, Error};
 
 /// Process command line arguments into a usefull output.
 /// This uses the `Clap` library.
@@ -112,54 +77,6 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
                 .multiple_occurrences(true),
         )
         .get_matches_from(preprocessed_args)
-}
-
-/// Clap is opinionated about how it accepts arguments. We thus preprocess our
-/// arguments. This handles the weird mechanic of exec, as well as changing
-/// -flag to --flag. Happily, normal flag use still works, and exec can still be
-/// passed a single argument as long as it's called with `--exec`.
-///
-/// If parsing was successful, then we return ok. Otherwise we return the string
-/// to be printed out when parsing fails.
-fn preprocess_args<I, S>(args: I) -> Result<Vec<String>, &'static str>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    let mut out: Vec<String> = Vec::new();
-    let mut exec: Option<Vec<String>> = None;
-    for arg in args.into_iter() {
-        let arg = arg.into();
-        if let Some(mut cmd) = exec {
-            if &arg == ";" {
-                out.push(cmd.join(" "));
-                exec = None;
-            } else {
-                exec = Some({
-                    cmd.push(arg);
-                    cmd
-                });
-            }
-        } else {
-            let sarg: &str = &arg;
-            match sarg {
-                "-print" => out.push(String::from("--print")),
-                "-name" => out.push(String::from("--name")),
-                "-type" => out.push(String::from("--type")),
-                "-mtime" => out.push(String::from("--mtime")),
-                "-exec" => {
-                    out.push(String::from("--exec"));
-                    exec = Some(Vec::new());
-                }
-                _ => out.push(arg.to_string()),
-            }
-        }
-    }
-    if exec.is_some() {
-        return Err("missing argument to `-exec'");
-    }
-
-    Ok(out)
 }
 
 fn main() -> io::Result<()> {
