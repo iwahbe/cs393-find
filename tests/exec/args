@@ -1,1 +1,1 @@
-../../src/ -exec python3 --version ; -print
+../../src/ -exec echo {} ;
