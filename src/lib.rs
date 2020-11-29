@@ -190,6 +190,7 @@ pub fn form_predicate(opts: &ArgMatches) -> Predicate {
 }
 
 /// Provides gnu-find compatible error handling.
+#[must_use]
 pub enum Error<T: std::fmt::Display> {
     /// Signals the too many symlinks error, expects to be given the path it tried to seach.
     TooManySymlinks(T),
@@ -230,7 +231,6 @@ impl<T: std::fmt::Display> Error<T> {
 
     /// Generates an error from an io::Error. If no error is found, a custom
     /// error is generated with whatever message `error` gives.
-    #[must_use]
     pub fn from_io(error: io::Error, path: T) -> Error<String> {
         #[cfg(target_os = "linux")]
         let too_many_syms = Some(40);

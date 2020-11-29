@@ -40,6 +40,6 @@ command.
   - [ ] mtime
   - [x] type
   - [x] name
-  - [ ] exec
-  - [ ] print
+  - [x] exec
+  - [x] print
   - [x] L
