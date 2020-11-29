@@ -217,17 +217,27 @@ impl<T: std::fmt::Display> std::fmt::Display for Error<T> {
 impl<T: std::fmt::Display> Error<T> {
     /// Signal an error to the user. Does not exit.
     pub fn sig(&self) {
-        eprintln!("gfind: {}", self);
+        #[cfg(linux)]
+        let name = std::env::args_os()
+            .next()
+            .unwrap_or(std::ffi::OsString::from("myfind"));
+        #[cfg(not(linux))]
+        let name = std::ffi::OsString::from("gfind");
+        eprintln!("{}: {}", name.to_string_lossy(), self);
     }
 
     pub fn from_io(error: io::Error, path: T) -> Error<String> {
+        #[cfg(linux)]
+        let too_many_syms = Some(40);
+        #[cfg(not(linux))]
+        let too_many_syms = Some(62);
         match error.kind() {
             // The only way to examine a file that doesn't exist is to fail at
             // the first search queary, or to have the file system change while
             // a search is occuring. While the second is possible, I don't think
             // it likely to be tested.
             std::io::ErrorKind::NotFound => Error::NoSuchFile(format!("{}", path)),
-            std::io::ErrorKind::Other if error.raw_os_error() == Some(62) => {
+            std::io::ErrorKind::Other if error.raw_os_error() == too_many_syms => {
                 Error::TooManySymlinks(format!("{}", path))
             }
             _ => Error::Custom(format!("{}", error)),
