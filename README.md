@@ -35,9 +35,9 @@ command.
 - [x] L
 - [x] Parsing cli correctly
 - [x] error messages are definitely different.
-- [ ] Testing
+- [x] Testing
   - [x] framework up
-  - [ ] mtime
+  - [x] mtime
   - [x] type
   - [x] name
   - [x] exec

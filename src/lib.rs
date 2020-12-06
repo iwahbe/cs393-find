@@ -15,6 +15,11 @@ use std::path::Path;
 use subprocess::Exec;
 
 /// Describes a command line given predicate.
+///
+/// A heap allocated closure that takes a path (describing a file) and it's
+/// associated metadata and returns either an io error or a bool. This indicates
+/// wheither to continue executing predicates or return false. Predicates are
+/// written to short circut, so their order of application matters.
 type Predicate = Box<dyn Fn(&Path, &Metadata) -> io::Result<bool>>;
 
 /// Provides a filter for the --type flag.
@@ -42,6 +47,8 @@ fn type_predicate(predicate: Predicate, accepted: Vec<String>) -> Predicate {
                     "l" => false_when!(!ft.is_symlink()),
                     "s" => false_when!(!ft.is_socket()),
                     _ => panic!("Found unimplemented type"),
+                    // This should be
+                    // validated by the input mechanism (clap)
                 }
             }
             true
@@ -53,23 +60,17 @@ fn type_predicate(predicate: Predicate, accepted: Vec<String>) -> Predicate {
 fn time_predicate(predicate: Predicate, accepted: i32) -> Predicate {
     Box::new(move |p, m: &Metadata| {
         Ok(predicate(p, m)? && {
-            let modified = m.modified()?;
-            let now = std::time::SystemTime::now();
-            let time_delta = if modified > now {
-                modified.duration_since(now).unwrap().as_secs()
-            } else {
-                now.duration_since(modified).unwrap().as_secs()
-            } as f64
-                / 60.0 // to minutes
-                / 60.0 // To hours
-                / 24.0; // To days
-            if accepted == 0 {
-                time_delta < 1.0
-            } else if accepted > 0 {
-                time_delta > accepted as f64
-            } else {
-                time_delta < (-accepted) as f64
-            }
+            // POSIX gives test
+            // (initialization time - modification time) / (60*60*25) =? accepted
+            // https://pubs.opengroup.org/onlinepubs/9699919799/utilities/find.html
+            let no_time = std::time::Duration::from_secs(0);
+            let modified = m.modified()?.elapsed().unwrap_or(no_time).as_secs() as f64;
+            let init = std::time::SystemTime::now()
+                .elapsed()
+                .unwrap_or(no_time)
+                .as_secs() as f64;
+            let sec_per_day: f64 = 60.0 * 60.0 * 25.0; // seconds in a day;
+            ((init - modified) / sec_per_day).ceil() as i32 == accepted
         })
     })
 }
@@ -77,6 +78,7 @@ fn time_predicate(predicate: Predicate, accepted: i32) -> Predicate {
 /// Filters on the `--name` argument.
 ///
 /// Panics when `fnmatch` provides an error code.
+/// Unsafe: handles interacting with the system fnmatch library.
 fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
     Box::new(move |p, m| {
         Ok(predicate(p, m)? && {
@@ -102,7 +104,8 @@ fn name_predicate(predicate: Predicate, name: CString) -> Predicate {
 
 /// Filters on the `--exec` predicate.
 ///
-/// Panics when the pipe fails.
+/// print_anyway corrosponds to the -print command. It corrosponds to running
+/// the command, but ignoring the result.
 fn exec_predicate(predicate: Predicate, command: String, print_anyway: bool) -> Predicate {
     Box::new(move |p, m| {
         Ok(predicate(p, m)? && {
@@ -117,6 +120,7 @@ fn exec_predicate(predicate: Predicate, command: String, print_anyway: bool) -> 
     })
 }
 
+/// We should signal an error when crawling the path.
 type SigError = bool;
 
 /// Recursivly traverse `path`. Only adds if `predicate(path, metadata(path))`
