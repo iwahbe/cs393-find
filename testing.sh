@@ -3,10 +3,6 @@
 # the name of the test. Each folder contains a file "args" which is a string fed
 # to both find commands. Then output is saved and compared.
 
-# Compile and unit tests
-cargo test || exit
-cargo build --release || exit
-
 # find executable and test directory
 test_dir=$(realpath tests)
 myfind=$(realpath ./target/release/myfind)

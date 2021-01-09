@@ -1,6 +1,5 @@
 use clap::{App, Arg, ArgMatches};
 use std::collections::HashSet;
-use std::io;
 use std::path::Path;
 use std::process::exit;
 
@@ -79,13 +78,18 @@ fn getopts(preprocessed_args: Vec<String>) -> ArgMatches {
         .get_matches_from(preprocessed_args)
 }
 
-fn main() -> io::Result<()> {
+/// Runs the main logic.
+///
+/// This is seperate from `main` because we need to both call `exit` and call
+/// drop constructors. We thus call drop constructors in `run`, while `main`
+/// handles exiting.
+fn run() -> Result<(), i32> {
     let args = std::env::args();
     let pre_process = match preprocess_args(args) {
         Ok(args) => args,
         Err(e) => {
             Error::Custom(e).sig();
-            exit(1);
+            return Err(1);
         }
     };
     let opts = getopts(pre_process);
@@ -102,7 +106,6 @@ fn main() -> io::Result<()> {
             })
             .collect()
     };
-    let mut error_no: i32 = 0;
     for starting_point in starting_points {
         let mut visited = HashSet::new();
         let predicate = form_predicate(&opts);
@@ -114,14 +117,21 @@ fn main() -> io::Result<()> {
         ) {
             Ok(sig_error) => {
                 if sig_error {
-                    error_no = 1;
+                    return Err(1);
                 }
             }
             Err(error) => {
                 Error::from_io(error, starting_point.display()).sig();
-                error_no = 1;
+                return Err(1);
             }
         }
     }
-    exit(error_no);
+    Ok(())
+}
+
+fn main() {
+    match run() {
+        Ok(_) => exit(0),
+        Err(e) => exit(e),
+    }
 }
